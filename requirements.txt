@@ -1,0 +1,4 @@
+# TIA — Phase 1 (Chunk 1) dependencies.
+# Only the desktop GUI is implemented so far. Voice, AI and automation
+# dependencies are added in their own chunks, pinned exactly when they land.
+PySide6==6.12.0
