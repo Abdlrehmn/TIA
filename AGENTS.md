@@ -12,148 +12,141 @@
 - **Goal:** a **local-first** Windows desktop assistant that understands
   English and Roman Urdu, answers through voice, and performs approved
   tasks on the user's computer.
-- **Privacy stance:** all processing runs on the local machine. No cloud
-  AI, no telemetry, no plaintext secrets, ever.
+- **Privacy stance:** all processing runs locally. No cloud AI, no
+  telemetry, no plaintext secrets — ever.
 
-## 2. Target hardware (design constraints)
+## 2. Architecture (decided by the user — do not change)
 
-- Windows 10/11, 32 GB RAM, 2 TB storage
-- NVIDIA GeForce RTX 3050 (VRAM unconfirmed — verify before choosing models)
-- AMD Ryzen 5 (generation unconfirmed)
-- Candidate model: Qwen3 4B via Ollama, pending VRAM verification. Every
-  future model/tool choice must fit comfortably in the available VRAM.
+- **Frontend:** React 19 + TypeScript (strict) + Tailwind CSS 4 + Vite.
+- **Desktop shell:** Tauri 2 (Rust) — the app must launch as a real
+  Windows desktop application, not a browser tab.
+- **Backend (future phase):** Python 3.11+ · FastAPI · Pydantic. The
+  frontend will talk to it through a **local authenticated API**
+  (localhost only, token-based).
+- **AI (future phase):** Ollama + Qwen3 4B Instruct (candidate; verify
+  RTX 3050 VRAM first).
+- **Future components:** faster-whisper (STT), SoundDevice (mic input),
+  Piper/Kokoro (TTS evaluation), SQLite (conversations + memory),
+  Playwright (controlled browser automation).
 
-## 3. Technology stack
+### Security invariants
 
-| Layer | Choice | Status |
-|---|---|---|
-| Language | Python 3.11+ (currently 3.14.3) | active |
-| GUI | PySide6 | active |
-| AI runtime | Ollama + Qwen3 4B | planned |
-| STT | faster-whisper | planned |
-| Wake word | openWakeWord (or equivalent local solution) | planned |
-| VAD | WebRTC VAD | planned |
-| Audio IO | SoundDevice | planned |
-| TTS | Piper (replaceable) | planned |
-| Browser automation | Playwright | planned |
-| Windows automation | pywinauto / Windows UI Automation | planned |
-| Database | SQLite | planned |
-| Credentials | Windows Credential Manager / secure OAuth | planned |
+- React must **never** receive unrestricted OS or shell access.
+- Tauri capabilities stay minimal: `core:default` only; do not add
+  shell/fs/http plugins without explicit user approval.
+- Dangerous actions (sending email, deleting files, uninstalling
+  software, changing important settings) always require explicit user
+  confirmation and will be implemented in the audited backend, not the
+  frontend.
+- Never bypass MFA, CAPTCHA or account security; never automate
+  credential entry; no secrets in frontend code.
 
-## 4. Architecture (module map)
-
-Independent modules; the UI never performs OS actions directly, and the
-AI brain never receives unrestricted shell access.
-
-### Current (Phase 1 · Chunk 1)
+## 3. Project layout
 
 ```
-main.py                  entry point (thin: logging + tia.app.run)
-tia/__init__.py          package identity and version
-tia/app.py               QApplication bootstrap, theming, lifecycle
-tia/ui/theme.py          design tokens (Palette) + QSS stylesheet
-tia/ui/app_icon.py       programmatically drawn application icon
-tia/ui/main_window.py    main window layout composition
-tia/ui/widgets/          StatusPill (+ StatusLevel), MicControl/MicButton,
-                         EmptyState
+TIA/
+├── frontend/                  all active work lives here
+│   ├── src/                   React app (components/, pages/, hooks/, lib/, types/)
+│   ├── src-tauri/             Tauri 2 shell (Rust, capabilities, icons, config)
+│   └── package.json           scripts: dev / build / tauri
+├── docs/                      architecture & design documentation
+├── legacy/pyside6-ui/         archived first prototype (do not develop here)
+├── AGENTS.md                  this file
+├── README.md                  user-facing docs
+└── .gitignore
 ```
 
-### Planned (create files only when their chunk starts — no placeholders)
+Rules:
 
-`tia/audio/`, `tia/vad/`, `tia/wake/`, `tia/stt/`, `tia/brain/` (Ollama
-client), `tia/tts/`, `tia/planning/`, `tia/tools/` (explicitly registered
-and validated tools), `tia/permissions/`, `tia/memory/` (SQLite),
-`tia/verification/`, `tia/config/`, `tia/security/`, `tia/integrations/`.
+- Do not create empty folders or placeholder modules without a real
+  purpose.
+- Do not create the Python backend in the frontend phase; when its phase
+  starts it becomes a sibling of `frontend/` (e.g. `backend/`).
+- UI keeps presentation only: no OS calls, no direct automation, no
+  secrets. Future OS integration flows through Tauri commands or the
+  local backend API — never inline in React.
 
-### Structural rules
+## 4. Coding conventions
 
-- UI code stays inside `tia/ui/` and must not call the OS, network, or
-  any automation API.
-- Tools are registered and validated explicitly; the AI never gets raw
-  shell/OS access.
-- Long-running work must never block the Qt event loop: use worker
-  threads communicating over Qt signals when implemented.
+**TypeScript/React**
 
-## 5. Coding conventions
+- Strict mode on; `verbatimModuleSyntax`; no unused locals/params
+  (enforced by `tsc --noEmit` on every build).
+- Components: PascalCase files and names; hooks: `useXxx` camelCase;
+  shared helpers live in `src/lib/`; shared types in `src/types/`.
+- Styling: Tailwind utility classes only; design tokens (colors, font)
+  live in `src/index.css` under `@theme` — no stray hard-coded hex values
+  in components.
+- Reusable UI (Orb, modals, buttons) goes in `src/components/ui/`.
 
-- Python 3.11+; full type hints on all public functions;
-  `from __future__ import annotations` at the top of each module.
-- A short, factual docstring on every module, class and public function.
-- Naming: `snake_case` for functions/variables, `PascalCase` for classes,
-  `UPPER_SNAKE` for constants; Qt widget `objectName`s match the names
-  used in `tia/ui/theme.py`.
-- Keep dependencies minimal: add a package only when the chunk that needs
-  it starts, pinned to an exact version in `requirements.txt`.
-- Error handling: log through the `logging` module; never swallow
-  exceptions silently; the GUI must not crash on bad input.
-- No hardcoded secrets, API keys, or passwords; no plaintext credential
-  storage (Windows Credential Manager or secure OAuth when needed).
-- All colors/styling live in `tia/ui/theme.py`; widgets reference design
-  tokens, never stray hex values.
-- Keep `main.py` thin; application lifecycle logic belongs in `tia/app.py`.
+**Rust (Tauri shell)**
 
-## 6. Safety requirements (non-negotiable)
+- Keep `src-tauri` minimal: default template structure, no extra
+  plugins beyond the debug-only log plugin. Run `cargo fmt` and
+  `cargo check` after any Rust change.
 
-- These actions require **explicit user confirmation** before execution:
-  sending email, deleting files, uninstalling software, modifying
-  important system settings, and any purchase/payment flow.
-- Never bypass MFA, CAPTCHA, or account security. Never automate
-  credential entry.
-- Account/profile switching (ChatGPT, Claude, VS Code) only through
-  user-approved, auditable steps.
-- Every proposed file/system tool must be reviewed by the user before it
-  is wired into the AI brain.
-- Never pretend unimplemented features work: mark them disabled or
-  "coming soon" in the UI until the real implementation lands.
+**General**
 
-## 7. Environment
+- Minimal dependencies: justify every package before installing; no
+  LangChain/LangGraph, no UI kits, no state libraries unless a phase
+  demands it.
+- Never silently swallow errors: log warnings (console.warn) with
+  context.
+- Never claim a feature works without testing it.
+- Do not rewrite working code for style alone; work incrementally.
 
-- Project-local virtual environment: `.venv/`, created from the
-  standalone **Python 3.14.3** (`py -3.14`), 64-bit.
-- The system Python / Anaconda base must never be modified; no global
-  installs; no administrator privileges.
-- PowerShell (project root):
+## 5. Environment & commands (verified in this project)
 
-  ```powershell
-  .\.venv\Scripts\Activate.ps1
-  python -m pip install -r requirements.txt   # only after requirements change
-  python main.py
-  ```
+```powershell
+cd C:\Users\ZAH\Desktop\RUMMAN\TIA\frontend
 
-- Validation commands (run after every change):
+npm install            # install frontend dependencies (first time)
+npm run dev            # Vite dev server at http://localhost:1420 (fixed port)
+npm run build          # TypeScript check + production web build
+npm run tauri dev      # real desktop window (requires Rust toolchain)
+npm run tauri build    # NSIS installer (requires Rust toolchain)
+```
 
-  ```powershell
-  python -m compileall -q tia main.py
-  python -c "import tia.app, tia.ui.main_window; print('imports ok')"
-  $env:QT_QPA_PLATFORM = "offscreen"
-  python -c "from PySide6.QtWidgets import QApplication; from tia.ui.main_window import MainWindow; app = QApplication([]); w = MainWindow(); w.show(); w.close(); print('offscreen ok')"
-  Remove-Item Env:QT_QPA_PLATFORM
-  ```
+Rust toolchain status: **not yet installed** — the user runs:
 
-## 8. Current phase & implementation boundaries
+```powershell
+winget install --id Rustlang.Rustup -e
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
 
-- **Current phase: Phase 1 — TIA Foundation.**
-- **Chunk 1 (COMPLETE):** environment, project skeleton, PySide6 desktop
-  shell (dark navy + cyan accent, status pill, disabled mic control,
-  disabled text input, honest empty state).
-- **Next chunk (do NOT start without explicit user instruction):
-  Chunk 2 — voice input pipeline** (SoundDevice capture, WebRTC VAD,
-  faster-whisper STT, GUI wiring).
-- Work incrementally; never rewrite unrelated files or working features;
-  inspect the workspace before changing anything.
-- Update `README.md` and this file whenever behavior, structure or
-  boundaries change.
+Vite dev port is fixed to **1420** (`vite.config.ts` strictPort) to match
+`tauri.conf.json` → `build.devUrl`. Do not change one without the other.
 
-## 9. Reporting expectations (every chunk)
+## 6. Current phase & boundaries
 
-Report: files created/changed, dependencies installed, tests performed
-and results, exact launch commands, and anything that still needs
-attention. Stop at the agreed chunk boundary and wait for the user.
+- **Phase 1 (COMPLETE):** Tauri 2 + React/TS/Tailwind foundation; single
+  ChatPage; sidebar (New Chat / history / Settings); welcome state;
+  text input with honest placeholder reply; mic button as disabled
+  visual placeholder; conversations persisted to localStorage; TIA
+  branding (navy + cyan, generated icon set); docs.
+- **Explicitly NOT in Phase 1 (do not implement without instruction):**
+  Ollama/AI logic, FastAPI backend, voice libraries, browser automation,
+  SQLite memory, account switching.
+- **Recommended next phase (Phase 2):** Python backend foundation —
+  FastAPI + Pydantic on 127.0.0.1 with token auth, then wire the
+  frontend to it so messages flow through a real API instead of
+  localStorage.
 
-## 10. Review expectations (Codex)
+## 7. Validation checklist (every chunk)
 
-- Verify the conventions and safety rules above.
-- Flag: missing type hints, secrets in code, unconfirmed features,
-  out-of-boundary edits, global installs, or GUI-blocking work.
-- Do not expand scope; changes outside the current chunk belong to the
-  next chunk.
+1. `npm run build` — TypeScript + production build pass.
+2. `npm run dev` — server responds 200 on port 1420.
+3. Rust changes: `cargo check` / `cargo fmt` inside `src-tauri/`.
+4. `npm run tauri dev` — desktop window opens and closes cleanly.
+5. `npm run tauri build` — when the environment supports it.
+6. Report created/changed files, deps + reasons, test results with real
+   output, launch commands, unresolved problems. Stop at the chunk
+   boundary and wait for the user.
+
+## 8. Review expectations (Codex)
+
+- Verify the architecture and security invariants above.
+- Flag: scope creep into future phases, unapproved plugins/capabilities,
+  missing type hints (TS strict failures), fake feature claims, secrets
+  in code, or changes to `legacy/` (frozen snapshot — read-only).
+- Do not expand scope; out-of-boundary work belongs to the next phase.

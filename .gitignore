@@ -1,13 +1,15 @@
-# Virtual environment
-.venv/
-venv/
+# Node / frontend
+node_modules/
+dist/
+.eslintcache
 
-# Python artifacts
+# Tauri / Rust (src-tauri has its own .gitignore for target/ and gen/)
+src-tauri/target/
+
+# Python (legacy archive + future backend phase)
+.venv/
 __pycache__/
 *.py[cod]
-*.egg-info/
-build/
-dist/
 
 # Secrets and environment files
 .env

@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/* Design tokens — carried over from the original TIA identity:
+   dark navy surfaces with a single cyan accent. */
+@theme {
+  --font-sans: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+
+  --color-deep: #07101e; /* sidebar / deepest layer */
+  --color-abyss: #0a1526; /* app background */
+  --color-surface: #0e1d33; /* cards, bubbles, inputs */
+  --color-raised: #132643; /* hover states, chips */
+  --color-hairline: #1d3252; /* borders */
+  --color-ink: #e8f1fb; /* primary text */
+  --color-muted: #8aa5c6; /* secondary text */
+  --color-faint: #5a7099; /* tertiary text, disabled */
+  --color-accent: #22d3ee; /* cyan accent */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-abyss);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.35);
+}
+
+/* Subtle dark scrollbars that match the theme. */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline);
+  border-radius: 8px;
+  border: 2px solid var(--color-abyss);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
