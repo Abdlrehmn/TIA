@@ -107,7 +107,9 @@ npm run tauri dev      # real desktop window (requires Rust toolchain)
 npm run tauri build    # NSIS installer (requires Rust toolchain)
 ```
 
-Rust toolchain status: **not yet installed** — the user runs:
+Rust and the Windows build environment are available in the project owner's
+environment; Phase 1 Rust compilation and Tauri packaging have been reported
+as passing. For a new machine without them, install:
 
 ```powershell
 winget install --id Rustlang.Rustup -e
@@ -127,10 +129,16 @@ Vite dev port is fixed to **1420** (`vite.config.ts` strictPort) to match
 - **Explicitly NOT in Phase 1 (do not implement without instruction):**
   Ollama/AI logic, FastAPI backend, voice libraries, browser automation,
   SQLite memory, account switching.
-- **Recommended next phase (Phase 2):** Python backend foundation —
-  FastAPI + Pydantic on 127.0.0.1 with token auth, then wire the
-  frontend to it so messages flow through a real API instead of
-  localStorage.
+- **Phase 2 (NOT STARTED):** Python FastAPI + Pydantic backend foundation.
+- The agreed roadmap is: Phase 0 environment and hardware verification;
+  Phase 1 React + TypeScript + Tailwind + Tauri foundation; Phase 2 Python
+  FastAPI backend foundation; Phase 3 frontend/backend communication;
+  Phase 4 Ollama integration; Phase 5 tool calling and agent loop; Phase 6
+  speech recognition; Phase 7 text-to-speech; Phase 8 desktop and browser
+  automation; Phase 9 SQLite memory and productivity; Phase 10 security,
+  testing, optimization and packaging.
+- `docs/PROJECT_STATUS.md` records the current state and distinguishes
+  tested work from planned work.
 
 ## 7. Validation checklist (every chunk)
 

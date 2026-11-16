@@ -9,6 +9,10 @@ in plain text.
 > voice and automation are **not implemented yet** and are marked as such
 > everywhere in the UI.
 
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the verified Phase 1
+status, limitations, decisions, and full agreed roadmap. Phase 2 (Python
+FastAPI backend foundation) has **not started**.
+
 ## Tech stack
 
 | Layer | Technology | Status |
@@ -109,6 +113,22 @@ npm run dev            # dev server on port 1420 (fixed for Tauri)
 - Dangerous actions (email, file deletion, uninstalling software, system
   settings) will always require explicit confirmation in later phases.
 - No bypassing of MFA, CAPTCHA or account security. Ever.
+
+## Phase roadmap
+
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Environment and hardware verification | Complete for Phase 1 environment |
+| 1 | React + TypeScript + Tailwind + Tauri foundation | **Complete** |
+| 2 | Python FastAPI backend foundation | **Not started** |
+| 3 | Frontend/backend communication | Planned |
+| 4 | Ollama integration | Planned |
+| 5 | Tool calling and agent loop | Planned |
+| 6 | Speech recognition | Planned |
+| 7 | Text-to-speech | Planned |
+| 8 | Desktop and browser automation | Planned |
+| 9 | SQLite memory and productivity | Planned |
+| 10 | Security, testing, optimization and packaging | Planned |
 
 ## License
 

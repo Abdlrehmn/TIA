@@ -72,15 +72,20 @@ chosen, and how the phases fit together. It is the companion to
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Tauri 2 + React/TS/Tailwind shell, chat UI foundation | ✅ done |
-| 2 | FastAPI + Pydantic backend on 127.0.0.1, token auth, wire frontend | next |
-| 3 | Ollama + Qwen3 4B brain, real replies, SQLite memory | planned |
-| 4 | Voice: SoundDevice capture, VAD, faster-whisper STT, TTS (Piper/Kokoro) | planned |
-| 5 | Tools: files, apps, browser (Playwright), email, reminders — with permission gates | planned |
-| 6 | Wake word, autonomous task planning + verification | planned |
+| 0 | Environment and hardware verification | Complete for Phase 1 environment; verify model hardware before AI integration |
+| 1 | React + TypeScript + Tailwind + Tauri foundation | **Complete** |
+| 2 | Python FastAPI backend foundation | **Not started** |
+| 3 | Frontend/backend communication | Planned |
+| 4 | Ollama integration | Planned |
+| 5 | Tool calling and agent loop | Planned |
+| 6 | Speech recognition | Planned |
+| 7 | Text-to-speech | Planned |
+| 8 | Desktop and browser automation | Planned |
+| 9 | SQLite memory and productivity | Planned |
+| 10 | Security, testing, optimization and packaging | Planned |
 
-Hardware constraint to verify before Phase 3: NVIDIA RTX 3050 VRAM
-(Qwen3 4B must fit comfortably; quantization likely).
+See [PROJECT_STATUS.md](PROJECT_STATUS.md) for implementation details,
+limitations, and owner-reported validation results.
 
 ## 6. Frontend module map
 
