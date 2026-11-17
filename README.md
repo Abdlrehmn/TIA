@@ -4,14 +4,13 @@ A **local-first** Windows desktop assistant for English and Roman Urdu.
 TIA runs entirely on your computer: no cloud AI, no telemetry, no secrets
 in plain text.
 
-> **Current status: Phase 1 complete — desktop shell + UI foundation.**
+> **Current status: Phases 1 and 2 complete — desktop foundation and backend health service.**
 > Text input works today with an honest placeholder reply. The AI brain,
 > voice and automation are **not implemented yet** and are marked as such
 > everywhere in the UI.
 
-See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the verified Phase 1
-status, limitations, decisions, and full agreed roadmap. Phase 2 (Python
-FastAPI backend foundation) has **not started**.
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for implementation
+status, limitations, decisions, and the full agreed roadmap.
 
 ## Tech stack
 
@@ -19,7 +18,7 @@ FastAPI backend foundation) has **not started**.
 |---|---|---|
 | Desktop shell | Tauri 2 (Rust) | ✅ active |
 | Frontend | React 19 + TypeScript + Tailwind CSS 4 (Vite) | ✅ active |
-| Backend | Python 3.11+ · FastAPI · Pydantic | ⏳ future phase |
+| Backend | Python 3.14.3 · FastAPI · Uvicorn · Pydantic | ✅ Phase 2 health service |
 | AI | Ollama + Qwen3 4B Instruct (candidate) | ⏳ future phase |
 | Speech | faster-whisper · SoundDevice · Piper/Kokoro | ⏳ future phase |
 | Storage | SQLite | ⏳ future phase |
@@ -86,6 +85,28 @@ cd C:\Users\ZAH\Desktop\RUMMAN\TIA\frontend
 npm run tauri build    # outputs NSIS installer under src-tauri/target/release/bundle/
 ```
 
+## Run the backend
+
+In PowerShell:
+
+```powershell
+cd C:\Users\ZAH\Desktop\RUMMAN\TIA\backend
+.\.venv\Scripts\Activate.ps1
+python -c "import sys; print(sys.executable)"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+The printed executable should be `...\TIA\backend\.venv\Scripts\python.exe`.
+In another PowerShell window, check the health endpoint and API docs:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/docs | Select-Object StatusCode
+```
+
+The health response is `status: healthy`, `app: TIA`, `version: 0.1.0`.
+Stop the server with `Ctrl+C`; run `deactivate` to leave the environment.
+
 ## Frontend-only checks (no Rust needed)
 
 ```powershell
@@ -104,7 +125,8 @@ npm run dev            # dev server on port 1420 (fixed for Tauri)
 | Microphone button | ❌ visual placeholder only (disabled) |
 | Real AI replies (Ollama + Qwen3) | ❌ future phase |
 | Voice input / TTS / wake word | ❌ future phase |
-| Python backend (FastAPI) + SQLite | ❌ future phase |
+| Python backend health service (FastAPI) | ✅ Phase 2; no frontend connection yet |
+| SQLite memory | ❌ future phase |
 
 ## Privacy & safety principles
 
@@ -120,8 +142,8 @@ npm run dev            # dev server on port 1420 (fixed for Tauri)
 |---|---|---|
 | 0 | Environment and hardware verification | Complete for Phase 1 environment |
 | 1 | React + TypeScript + Tailwind + Tauri foundation | **Complete** |
-| 2 | Python FastAPI backend foundation | **Not started** |
-| 3 | Frontend/backend communication | Planned |
+| 2 | Python FastAPI backend foundation | **Complete** |
+| 3 | Frontend/backend communication | **Next; not started** |
 | 4 | Ollama integration | Planned |
 | 5 | Tool calling and agent loop | Planned |
 | 6 | Speech recognition | Planned |

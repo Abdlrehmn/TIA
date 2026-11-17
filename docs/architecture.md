@@ -17,11 +17,11 @@ chosen, and how the phases fit together. It is the companion to
 │  │  - Sidebar: New Chat / history / Settings           │  │
 │  │  - ConversationArea + ChatInput                     │  │
 │  └──────────────────┬──────────────────────────────────┘  │
-│                     │ (Phase 2+: local authenticated API) │
+│                     │ (Phase 3: authenticated API use)    │
 │  ┌──────────────────▼──────────────────────────────────┐  │
-│  │  Python 3.11+ · FastAPI · Pydantic (127.0.0.1 only) │  │
-│  │  tools registry · permissions · memory (SQLite)     │  │
-│  │  AI brain: Ollama + Qwen3 4B · STT/TTS pipeline     │  │
+│  │  Python 3.14.3 · FastAPI · Uvicorn · Pydantic        │  │
+│  │  Phase 2: localhost health endpoint + API docs       │  │
+│  │  Future: AI, tools, voice, permissions, SQLite       │  │
 │  └─────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -51,8 +51,8 @@ chosen, and how the phases fit together. It is the companion to
 3. **The Python backend** owns all OS-facing work. Every dangerous tool
    (email, delete, uninstall, settings) requires explicit user
    confirmation and will be registered in an auditable tools registry.
-4. **Local authenticated API (planned, Phase 2+):** FastAPI binds to
-   127.0.0.1 only; the Tauri shell starts the backend as a child process
+4. **Local authenticated API (planned, Phase 3):** FastAPI will bind to
+   127.0.0.1 only; the Tauri shell will start the backend as a child process
    and hands the frontend a short-lived token (e.g. generated at startup
    and passed via a Tauri command); every request carries it as a
    bearer header. This prevents random local processes from talking to
@@ -74,8 +74,8 @@ chosen, and how the phases fit together. It is the companion to
 |---|---|---|
 | 0 | Environment and hardware verification | Complete for Phase 1 environment; verify model hardware before AI integration |
 | 1 | React + TypeScript + Tailwind + Tauri foundation | **Complete** |
-| 2 | Python FastAPI backend foundation | **Not started** |
-| 3 | Frontend/backend communication | Planned |
+| 2 | Python FastAPI backend foundation | **Complete** |
+| 3 | Frontend/backend communication | **Next; not started** |
 | 4 | Ollama integration | Planned |
 | 5 | Tool calling and agent loop | Planned |
 | 6 | Speech recognition | Planned |

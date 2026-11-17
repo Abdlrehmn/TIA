@@ -11,7 +11,8 @@ foundation; it is not yet an AI assistant.
 
 - **Phase 1: COMPLETE** — React, TypeScript, Tailwind CSS, Vite, and Tauri
   desktop foundation.
-- **Phase 2: NOT STARTED** — Python FastAPI backend foundation.
+- **Phase 2: COMPLETE** — Python 3.14.3 FastAPI backend foundation with a
+  localhost-only health endpoint. See [backend setup](../backend/README.md).
 
 ## Completed and verified in Phase 1
 
@@ -38,7 +39,7 @@ These are owner-reported results; this review did not rerun them.
 | Desktop shell | Tauri 2 and Rust | Implemented and tested |
 | UI | React 19, TypeScript, Tailwind CSS 4, Vite | Implemented and tested |
 | Conversation storage | Browser `localStorage` | Implemented; local to the app profile |
-| Backend | Python 3.11+, FastAPI, Pydantic | Planned; Phase 2 not started |
+| Backend | Python 3.14.3, FastAPI, Uvicorn, Pydantic | Implemented in `backend/` with isolated `backend/.venv/` |
 | AI | Ollama + Qwen3 4B Instruct candidate | Planned; hardware/VRAM suitability must be checked |
 | Speech | faster-whisper, SoundDevice, Piper/Kokoro evaluation | Planned |
 | Memory | SQLite | Planned |
@@ -52,6 +53,9 @@ These are owner-reported results; this review did not rerun them.
 - Conversations use `localStorage`; there is no backend or SQLite database.
 - No computer or browser automation is implemented.
 - Phase 1 has no authenticated local API or backend process.
+- Phase 2 provides only `GET /health` and generated `/docs`; it does not
+  connect to the frontend or provide authentication, AI, voice, storage, or
+  automation features.
 
 ## Agreed phase roadmap
 
@@ -59,8 +63,8 @@ These are owner-reported results; this review did not rerun them.
 |---|---|---|
 | 0 | Environment and hardware verification | Complete for the Phase 1 environment; model hardware verification remains relevant before AI integration |
 | 1 | React + TypeScript + Tailwind + Tauri foundation | **Complete** |
-| 2 | Python FastAPI backend foundation | **Not started** |
-| 3 | Frontend/backend communication | Planned |
+| 2 | Python FastAPI backend foundation | **Complete** |
+| 3 | Frontend/backend communication | **Next; not started** |
 | 4 | Ollama integration | Planned |
 | 5 | Tool calling and agent loop | Planned |
 | 6 | Speech recognition | Planned |
@@ -80,6 +84,6 @@ These are owner-reported results; this review did not rerun them.
 - Processing is intended to remain local, with no cloud AI or telemetry.
 - Dangerous actions require explicit user confirmation and belong in an
   audited backend/tool layer.
-- The Python backend is a sibling of `frontend/` and begins in Phase 2; it is
-  not part of the completed Phase 1 implementation.
+- The Python backend is a sibling of `frontend/`. Phase 2 establishes its
+  isolated FastAPI foundation; frontend communication remains Phase 3.
 - The legacy PySide6 prototype is archived and read-only.
