@@ -21,6 +21,10 @@ logs/
 *.log
 *.db
 *.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Tooling caches
 .pytest_cache/
@@ -33,3 +37,6 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
+
+# Isolated local review run
+.tia-dev-data/

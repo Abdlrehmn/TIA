@@ -7,6 +7,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: {
+    host: "127.0.0.1",
+    origin: "http://localhost:1420",
     port: 1420,
     strictPort: true,
   },

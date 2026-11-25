@@ -20,11 +20,13 @@
 - **Frontend:** React 19 + TypeScript (strict) + Tailwind CSS 4 + Vite.
 - **Desktop shell:** Tauri 2 (Rust) — the app must launch as a real
   Windows desktop application, not a browser tab.
-- **Backend (future phase):** Python 3.11+ · FastAPI · Pydantic. The
-  frontend will talk to it through a **local authenticated API**
-  (localhost only, token-based).
-- **AI (future phase):** Ollama + Qwen3 4B Instruct (candidate; verify
-  RTX 3050 VRAM first).
+- **Backend:** Python 3.14.3 · FastAPI · Uvicorn · Pydantic in `backend/`.
+  Chat, SQLite conversation persistence, and conversation-aware context are
+  implemented. Non-health routes require a per-session bearer token. The
+  development launcher bootstraps it; packaged Python backend supervision and
+  private production token handoff remain incomplete.
+- **AI:** Ollama with `qwen3:4b` through the local backend. Memory extraction
+  and approval are not implemented.
 - **Future components:** faster-whisper (STT), SoundDevice (mic input),
   Piper/Kokoro (TTS evaluation), SQLite (conversations + memory),
   Playwright (controlled browser automation).
@@ -45,10 +47,11 @@
 
 ```
 TIA/
-├── frontend/                  all active work lives here
+├── frontend/                  React app + Tauri 2 shell (Phase 1)
 │   ├── src/                   React app (components/, pages/, hooks/, lib/, types/)
 │   ├── src-tauri/             Tauri 2 shell (Rust, capabilities, icons, config)
 │   └── package.json           scripts: dev / build / tauri
+├── backend/                   Python FastAPI backend (Phase 2; sibling of frontend/)
 ├── docs/                      architecture & design documentation
 ├── legacy/pyside6-ui/         archived first prototype (do not develop here)
 ├── AGENTS.md                  this file
@@ -60,8 +63,8 @@ Rules:
 
 - Do not create empty folders or placeholder modules without a real
   purpose.
-- Do not create the Python backend in the frontend phase; when its phase
-  starts it becomes a sibling of `frontend/` (e.g. `backend/`).
+- Keep the Python backend in `backend/`, a sibling of `frontend/`. Do not
+  place backend code inside `frontend/` or create a second backend tree.
 - UI keeps presentation only: no OS calls, no direct automation, no
   secrets. Future OS integration flows through Tauri commands or the
   local backend API — never inline in React.
@@ -123,18 +126,26 @@ Vite dev port is fixed to **1420** (`vite.config.ts` strictPort) to match
 
 - **Phase 1 (COMPLETE):** Tauri 2 + React/TS/Tailwind foundation; single
   ChatPage; sidebar (New Chat / history / Settings); welcome state;
-  text input with honest placeholder reply; mic button as disabled
-  visual placeholder; conversations persisted to localStorage; TIA
-  branding (navy + cyan, generated icon set); docs.
-- **Explicitly NOT in Phase 1 (do not implement without instruction):**
-  Ollama/AI logic, FastAPI backend, voice libraries, browser automation,
-  SQLite memory, account switching.
-- **Phase 2 (NOT STARTED):** Python FastAPI + Pydantic backend foundation.
+  text input; mic button as disabled visual placeholder; conversations
+  persisted to localStorage; TIA branding (navy + cyan, generated icon
+  set); docs. Its original fixed placeholder reply was replaced in Phase 3.
+- **Phase 2 (COMPLETE):** Python FastAPI + Pydantic backend foundation in
+  `backend/`: localhost-only health endpoint and generated API docs.
+- **Phase 3 (COMPLETE):** frontend/backend communication and conversation
+  synchronization are implemented.
+- **Phase 4 (COMPLETE):** local Ollama chat, SSE streaming, and opt-in search
+  are implemented.
+- **Phase 5 (IN PROGRESS):** Milestones 1 and 2 are complete. Milestone 3.1
+  adds authenticated API access, sequential migrations, and turn provenance.
+  Packaged backend process supervision remains incomplete.
+- **Still NOT implemented (do not implement without instruction):** memory
+  extraction, memory APIs/approval UI, embeddings/RAG, voice libraries, browser
+  automation, account switching, packaged backend supervision.
 - The agreed roadmap is: Phase 0 environment and hardware verification;
   Phase 1 React + TypeScript + Tailwind + Tauri foundation; Phase 2 Python
   FastAPI backend foundation; Phase 3 frontend/backend communication;
-  Phase 4 Ollama integration; Phase 5 tool calling and agent loop; Phase 6
-  speech recognition; Phase 7 text-to-speech; Phase 8 desktop and browser
+  Phase 4 Ollama integration; Phase 5 SQLite conversations, security, memory
+  and later agent work; Phase 6 speech recognition; Phase 7 text-to-speech; Phase 8 desktop and browser
   automation; Phase 9 SQLite memory and productivity; Phase 10 security,
   testing, optimization and packaging.
 - `docs/PROJECT_STATUS.md` records the current state and distinguishes

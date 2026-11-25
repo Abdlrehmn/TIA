@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Conversation, Message } from "../types/chat";
 import { loadConversations, saveConversations } from "../lib/storage";
-import { MAX_TITLE_LENGTH, PLACEHOLDER_REPLY } from "../lib/constants";
+import { synchronizeConversations } from "../lib/api";
+import { MAX_TITLE_LENGTH } from "../lib/constants";
 import { uid } from "../lib/uid";
 
 function makeConversation(): Conversation {
@@ -16,16 +17,48 @@ function titleFrom(text: string): string {
     : trimmed.slice(0, MAX_TITLE_LENGTH - 1) + "…";
 }
 
+function mergePersistedWithLive(persisted: Conversation[], live: Conversation[]): Conversation[] {
+  const liveById = new Map(live.map((conversation) => [conversation.id, conversation]));
+  const merged = persisted.map((stored) => {
+    const current = liveById.get(stored.id);
+    if (!current) return stored;
+    const storedMessages = new Map(stored.messages.map((message) => [message.id, message]));
+    const messages = current.messages.map((message) => storedMessages.get(message.id) ?? message);
+    const seen = new Set(messages.map((message) => message.id));
+    messages.push(...stored.messages.filter((message) => !seen.has(message.id)));
+    return {
+      ...stored,
+      title: current.messages.length > stored.messages.length ? current.title : stored.title,
+      messages,
+    };
+  });
+  const persistedIds = new Set(persisted.map((conversation) => conversation.id));
+  merged.push(...live.filter((conversation) => !persistedIds.has(conversation.id)));
+  return merged;
+}
+
 /**
- * Local conversation state for Phase 1: create chats, send messages and
- * get an honest placeholder reply. Persistence is browser-local only;
- * the backend phase will replace this with API calls + SQLite storage.
+ * Local conversation state: messages and conversations remain persisted in
+ * browser localStorage while assistant replies come from the local backend.
  */
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>(
     () => loadConversations() ?? [],
   );
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const local = loadConversations() ?? [];
+    void synchronizeConversations(local).then((persisted) => {
+      if (cancelled) return;
+      setConversations((current) => mergePersistedWithLive(persisted, current));
+      setActiveId((current) => current ?? persisted[0]?.id ?? null);
+    }).catch((error: unknown) => {
+      console.warn("TIA: backend conversation sync failed; keeping local conversations.", error);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     saveConversations(conversations);
@@ -49,26 +82,27 @@ export function useConversations() {
     setActiveId(id);
   }
 
-  function sendMessage(text: string): void {
+  function sendMessage(text: string): { conversationId: string; messageId: string; createdAt: number } | null {
     const content = text.trim();
-    if (!content) return;
+    if (!content) return null;
 
+    const createdAt = Date.now();
+    const messageId = uid();
     const userMessage: Message = {
-      id: uid(),
+      id: messageId,
       role: "user",
       content,
-      createdAt: Date.now(),
+      createdAt,
     };
-    let conversationId = activeId;
+    const conversationId =
+      activeId && conversations.some((conversation) => conversation.id === activeId)
+        ? activeId
+        : uid();
 
     setConversations((prev) => {
-      let next = prev;
-      // No active chat yet: create one implicitly so text input works on day one.
-      if (!conversationId || !prev.some((c) => c.id === conversationId)) {
-        const conversation = makeConversation();
-        conversationId = conversation.id;
-        next = [conversation, ...prev];
-      }
+      const next = prev.some((conversation) => conversation.id === conversationId)
+        ? prev
+        : [{ ...makeConversation(), id: conversationId }, ...prev];
       return next.map((c) =>
         c.id === conversationId
           ? {
@@ -80,22 +114,81 @@ export function useConversations() {
       );
     });
     setActiveId(conversationId);
-
-    // Honest placeholder "reply" so the input does something real today.
-    window.setTimeout(() => {
-      const reply: Message = {
-        id: uid(),
-        role: "assistant",
-        content: PLACEHOLDER_REPLY,
-        createdAt: Date.now(),
-      };
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === conversationId ? { ...c, messages: [...c.messages, reply] } : c,
-        ),
-      );
-    }, 600);
+    return { conversationId, messageId, createdAt };
   }
 
-  return { conversations, activeId, active, newChat, selectChat, sendMessage };
+  function createAssistantMessage(conversationId: string): { id: string; createdAt: number } {
+    const createdAt = Date.now();
+    const reply: Message = {
+      id: uid(),
+      role: "assistant",
+      content: "",
+      createdAt,
+      completed: false,
+    };
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, messages: [...conversation.messages, reply] }
+          : conversation,
+      ),
+    );
+    return { id: reply.id, createdAt };
+  }
+
+  function appendAssistantMessage(
+    conversationId: string,
+    messageId: string,
+    content: string,
+  ): void {
+    if (!content) return;
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              messages: conversation.messages.map((message) =>
+                message.id === messageId
+                  ? { ...message, content: message.content + content }
+                  : message,
+              ),
+            }
+          : conversation,
+      ),
+    );
+  }
+
+  function removeAssistantMessage(conversationId: string, messageId: string): void {
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              messages: conversation.messages.filter((message) => message.id !== messageId),
+            }
+          : conversation,
+      ),
+    );
+  }
+
+  function completeAssistantMessage(conversationId: string, messageId: string): void {
+    setConversations((prev) => prev.map((conversation) => conversation.id === conversationId
+      ? { ...conversation, messages: conversation.messages.map((message) => message.id === messageId
+        ? { ...message, completed: true }
+        : message) }
+      : conversation));
+  }
+
+  return {
+    conversations,
+    activeId,
+    active,
+    newChat,
+    selectChat,
+    sendMessage,
+    createAssistantMessage,
+    appendAssistantMessage,
+    removeAssistantMessage,
+    completeAssistantMessage,
+  };
 }

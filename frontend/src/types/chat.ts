@@ -7,6 +7,8 @@ export interface Message {
   role: Role;
   content: string;
   createdAt: number;
+  /** False while streamed locally; absent means a legacy completed message. */
+  completed?: boolean;
 }
 
 export interface Conversation {
