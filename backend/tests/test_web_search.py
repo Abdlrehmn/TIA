@@ -1,149 +1,242 @@
-"""Focused tests for TIA's opt-in DuckDuckGo search endpoint."""
+"""Bing discovery, provider fallback, validation, lifecycle, and API tests."""
 
 import asyncio
+import base64
 import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import urlencode
 
-from ddgs.exceptions import DDGSException, TimeoutException
 from fastapi import HTTPException
 from pydantic import ValidationError
+from scrapling.parser import Selector
 
 from app import main
 from app.core import config
 from app.services import web_search
 
 
-class WebSearchServiceTests(unittest.TestCase):
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_search_uses_configured_duckduckgo_and_normalizes_results(self, engine_class):
-        engine = MagicMock()
-        engine.search.return_value = [
-            {
-                "title": "Example",
-                "href": "https://example.com/article",
-                "body": " A useful snippet ",
-                "date": "2026-01-02",
-                "provider_only": "discard me",
-            },
-            {"title": "Unsafe", "href": "javascript:alert(1)", "body": "bad"},
-            None,
-        ]
-        engine_class.return_value = engine
-
-        results = web_search.search_web("example query", 3)
-
-        engine_class.assert_called_once_with(timeout=config.WEB_SEARCH_TIMEOUT_SECONDS)
-        engine.search.assert_called_once_with(
-            query="example query",
-            region=config.WEB_SEARCH_REGION,
-            safesearch=config.WEB_SEARCH_SAFESEARCH,
-            timelimit=None,
-            page=1,
+def bing_html(entries: list[tuple[str, str, str]]) -> str:
+    blocks = []
+    for title, url, snippet in entries:
+        encoded = base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")
+        redirect = "https://www.bing.com/ck/a?" + urlencode({"u": "a1" + encoded})
+        blocks.append(
+            "<li class='b_algo'><h2><a href='{}'>{}</a></h2>"
+            "<div class='b_caption'><p>{}</p></div></li>".format(redirect, title, snippet)
         )
+    return "<html><head><title>Query - Search</title></head><body>{}</body></html>".format("".join(blocks))
+
+
+class FakeResponse:
+    def __init__(self, html: str, status: int = 200) -> None:
+        self.status = status
+        self._selector = Selector(content=html)
+
+    def xpath(self, selector: str):
+        return self._selector.xpath(selector)
+
+    def get_all_text(self) -> str:
+        return str(self._selector.get_all_text())
+
+
+class FakePage:
+    def __init__(self, html: str, status: int = 200) -> None:
+        self.html = html
+        self.status = status
+
+    async def goto(self, *_args, **_kwargs):
+        return MagicMock(status=self.status)
+
+    async def content(self) -> str:
+        return self.html
+
+
+class FakeContext:
+    def __init__(self, page: FakePage) -> None:
+        self.page = page
+        self.closed = False
+
+    async def route(self, *_args, **_kwargs):
+        return None
+
+    async def new_page(self):
+        return self.page
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakeBrowser:
+    def __init__(self, page: FakePage) -> None:
+        self.context = FakeContext(page)
+        self.context_count = 0
+
+    async def new_context(self):
+        self.context_count += 1
+        return self.context
+
+
+class WebSearchProviderTests(unittest.TestCase):
+    def provider(self) -> web_search.BingSearchProvider:
+        return web_search.BingSearchProvider()
+
+    def test_scrapling_success_extracts_and_validates_organic_result(self):
+        response = FakeResponse(
+            bing_html([("Example title", "https://example.com/article", "A useful snippet.")])
+        )
+        provider = self.provider()
+
+        async def run():
+            with patch.object(web_search.AsyncFetcher, "get", new=AsyncMock(return_value=response)) as fetch:
+                results = await provider.search("example query", 3)
+            fetch.assert_awaited_once()
+            self.assertEqual(fetch.await_args.kwargs["retries"], 1)
+            return results
+
         self.assertEqual(
-            results,
+            asyncio.run(run()),
+            [web_search.WebSearchResult("Example title", "https://example.com/article", "A useful snippet.", None)],
+        )
+
+    def test_scrapling_block_page_triggers_playwright_fallback(self):
+        provider = self.provider()
+        browser = FakeBrowser(
+            FakePage(bing_html([("Fallback", "https://example.org", "Browser result")]))
+        )
+        provider._browser = browser
+
+        async def run():
+            with patch.object(
+                web_search.AsyncFetcher,
+                "get",
+                new=AsyncMock(return_value=FakeResponse("<html><body>Verify you are human CAPTCHA</body></html>")),
+            ):
+                return await provider.search("query", 2)
+
+        results = asyncio.run(run())
+        self.assertEqual(results[0].title, "Fallback")
+        self.assertEqual(browser.context_count, 1)
+        self.assertTrue(browser.context.closed)
+
+    def test_scrapling_timeout_uses_playwright_fallback(self):
+        provider = self.provider()
+        provider._browser = FakeBrowser(
+            FakePage(bing_html([("Fallback", "https://example.org", "Browser result")]))
+        )
+
+        async def run():
+            with patch.object(web_search.AsyncFetcher, "get", new=AsyncMock(side_effect=TimeoutError)):
+                return await provider.search("query", 2)
+
+        self.assertEqual(asyncio.run(run())[0].title, "Fallback")
+
+    def test_both_providers_failing_returns_sanitized_error(self):
+        provider = self.provider()
+        provider._browser = FakeBrowser(FakePage("<html><body>CAPTCHA</body></html>"))
+
+        async def run():
+            with patch.object(
+                web_search.AsyncFetcher,
+                "get",
+                new=AsyncMock(side_effect=RuntimeError("private detail")),
+            ):
+                with self.assertRaises(web_search.WebSearchProviderError) as caught:
+                    await provider.search("query", 2)
+                self.assertNotIn("private detail", str(caught.exception))
+
+        asyncio.run(run())
+
+    def test_invalid_urls_and_duplicate_results_are_rejected(self):
+        entries = [
+            ("Local", "http://127.0.0.1/", "Unsafe"),
+            ("Short loopback", "http://127.1/", "Unsafe"),
+            ("Hex loopback", "http://0x7f000001/", "Unsafe"),
+            ("Private", "http://10.0.0.1/", "Unsafe"),
+            ("Malformed", "javascript:alert(1)", "Unsafe"),
+            ("Bing nav", "https://www.bing.com/news", "Navigation"),
+            ("Good", "https://example.com/page#first", "First snippet"),
+            ("Duplicate", "https://EXAMPLE.com/page#second", "Second snippet"),
+        ]
+        results = web_search._parse_results(FakeResponse(bing_html(entries)), 10)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].url, "https://example.com/page")
+
+    def test_ad_result_blocks_are_rejected(self):
+        html = bing_html(
             [
-                web_search.WebSearchResult(
-                    "Example",
-                    "https://example.com/article",
-                    "A useful snippet",
-                    "2026-01-02",
-                )
-            ],
+                ("Sponsored", "https://ads.example.com", "Ad snippet"),
+                ("Organic", "https://example.com", "Organic snippet"),
+            ]
+        ).replace("class='b_algo'", "class='b_ad b_algo'", 1)
+        results = web_search._parse_results(FakeResponse(html), 5)
+        self.assertEqual([result.title for result in results], ["Organic"])
+
+    def test_captcha_consent_and_bot_pages_are_detected(self):
+        blocked_pages = (
+            "<html><body>CAPTCHA</body></html>",
+            "<html><body>Before you continue, please review your privacy choices.</body></html>",
+            "<html><body>We detected unusual traffic from this network.</body></html>",
+            "<html><body>Your request has been blocked.</body></html>",
         )
+        for content in blocked_pages:
+            with self.subTest(content=content), self.assertRaises(web_search.WebSearchProviderError):
+                web_search._parse_results(FakeResponse(content), 5)
 
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_search_caps_results_and_preserves_empty_results(self, engine_class):
-        engine = MagicMock()
-        engine.search.return_value = [
-            {"title": f"Title {index}", "href": f"https://example.com/{index}", "body": "Snippet"}
-            for index in range(config.WEB_SEARCH_MAX_RESULTS + 4)
-        ]
-        engine_class.return_value = engine
+    def test_concurrent_searches_are_bounded_by_semaphore(self):
+        provider = self.provider()
+        active = 0
+        peak = 0
 
-        results = web_search.search_web("query", config.WEB_SEARCH_MAX_RESULTS + 5)
-        self.assertEqual(len(results), config.WEB_SEARCH_MAX_RESULTS)
-        self.assertEqual(engine.search.call_args.kwargs["page"], 1)
+        async def fetch(*_args, **_kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return FakeResponse(bing_html([("Result", "https://example.com", "Snippet")]))
 
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_successful_empty_parse_returns_empty_results(self, engine_class):
-        engine = MagicMock()
-        engine.search.return_value = []
-        engine_class.return_value = engine
+        async def run():
+            with patch.object(web_search.AsyncFetcher, "get", new=AsyncMock(side_effect=fetch)):
+                await asyncio.gather(*(provider.search(f"query {index}", 1) for index in range(12)))
 
-        self.assertEqual(web_search.search_web("query", 1), [])
+        asyncio.run(run())
+        self.assertLessEqual(peak, web_search._MAX_CONCURRENT_SEARCHES)
+        self.assertGreater(peak, 1)
 
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_timeout_is_mapped_to_sanitized_timeout_error(self, engine_class):
-        engine = MagicMock()
-        engine.search.side_effect = TimeoutException("private provider detail")
-        engine_class.return_value = engine
+    def test_browser_startup_and_shutdown_manage_single_shared_instance(self):
+        browser = MagicMock()
+        browser.close = AsyncMock()
+        playwright = MagicMock()
+        playwright.chromium.launch = AsyncMock(return_value=browser)
+        playwright.stop = AsyncMock()
+        manager = MagicMock()
+        manager.start = AsyncMock(return_value=playwright)
+        provider = self.provider()
+        provider._safe_proxy.start = AsyncMock(return_value="http://127.0.0.1:12345")
+        provider._safe_proxy.close = AsyncMock()
 
-        with self.assertRaises(web_search.WebSearchTimeoutError) as caught:
-            web_search.search_web("query", 1)
-        self.assertNotIn("private provider detail", str(caught.exception))
-        engine.search.assert_called_once()
+        async def run():
+            with patch("app.services.web_search.async_playwright", return_value=manager):
+                await provider.start()
+                await provider.start()
+                await provider.close()
 
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_provider_failure_is_mapped_to_sanitized_error(self, engine_class):
-        engine = MagicMock()
-        engine.search.side_effect = DDGSException("private provider detail")
-        engine_class.return_value = engine
-
-        with self.assertRaises(web_search.WebSearchProviderError) as caught:
-            web_search.search_web("query", 1)
-        self.assertNotIn("private provider detail", str(caught.exception))
-
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_no_results_from_successful_parse_becomes_empty_list(self, engine_class):
-        engine = MagicMock()
-        engine.search.return_value = []
-        engine_class.return_value = engine
-
-        self.assertEqual(web_search.search_web("query", 1), [])
-
-    def test_non_200_http_response_is_not_mistaken_for_empty_results(self):
-        engine = web_search._CheckedDuckduckgo.__new__(web_search._CheckedDuckduckgo)
-        engine.http_client = MagicMock()
-        engine.http_client.request.return_value.status_code = 202
-
-        with self.assertRaises(web_search._DuckDuckGoHTTPError) as caught:
-            engine.request("POST", "https://html.duckduckgo.com/html/")
-        self.assertEqual(caught.exception.status_code, 202)
-
-    @patch("app.services.web_search._CheckedDuckduckgo")
-    def test_http_202_becomes_provider_error_instead_of_empty_results(self, engine_class):
-        engine = MagicMock()
-        engine.search.side_effect = web_search._DuckDuckGoHTTPError(202)
-        engine_class.return_value = engine
-
-        with self.assertRaises(web_search.WebSearchProviderError):
-            web_search.search_web("query", 1)
-
-    def test_private_local_and_non_http_urls_are_rejected(self):
-        unsafe_urls = (
-            "http://127.0.0.1/",
-            "http://10.0.0.2/",
-            "http://[::1]/",
-            "http://localhost/",
-            "http://gateway.internal/",
-            "http://router.home/",
-            "http://host.test/",
-            r"http:\\127.0.0.1\admin",
-            "http://printer/",
-            "http://router.local/",
-            "javascript:alert(1)",
+        asyncio.run(run())
+        manager.start.assert_awaited_once()
+        playwright.chromium.launch.assert_awaited_once_with(
+            headless=True,
+            proxy={
+                "server": "http://127.0.0.1:12345",
+                "bypass": "",
+                "username": provider._safe_proxy.username,
+                "password": provider._safe_proxy.password,
+            },
         )
-        for url in unsafe_urls:
-            with self.subTest(url=url):
-                self.assertIsNone(web_search._valid_http_url(url))
-
-    def test_public_url_is_retained(self):
-        self.assertEqual(
-            web_search._valid_http_url("https://example.com/article"),
-            "https://example.com/article",
-        )
+        browser.close.assert_awaited_once()
+        playwright.stop.assert_awaited_once()
+        provider._safe_proxy.close.assert_awaited_once()
+        self.assertIsNone(provider._browser)
 
 
 class WebSearchEndpointTests(unittest.TestCase):
@@ -161,28 +254,25 @@ class WebSearchEndpointTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 503)
         self.assertIn("TIA_WEB_SEARCH_ENABLED=true", caught.exception.detail)
 
-    def test_enabled_endpoint_returns_typed_result_contract(self):
+    def test_enabled_endpoint_preserves_typed_response_contract(self):
         expected = [web_search.WebSearchResult("Title", "https://example.com", "Snippet", None)]
-        with (
-            patch.object(main, "WEB_SEARCH_ENABLED", True),
-            patch.object(main, "search_web", return_value=expected) as search,
-        ):
-            response = asyncio.run(main.web_search_endpoint(main.WebSearchRequest(query=" hello ")))
 
-        search.assert_called_once_with("hello", config.WEB_SEARCH_MAX_RESULTS)
+        async def run():
+            with (
+                patch.object(main, "WEB_SEARCH_ENABLED", True),
+                patch("app.main.search_web", new=AsyncMock(return_value=expected)) as search,
+            ):
+                response = await main.web_search_endpoint(main.WebSearchRequest(query=" hello "))
+            search.assert_awaited_once_with("hello", config.WEB_SEARCH_MAX_RESULTS)
+            return response
+
+        response = asyncio.run(run())
         self.assertEqual(
             response.model_dump(),
             {
                 "success": True,
                 "query": "hello",
-                "results": [
-                    {
-                        "title": "Title",
-                        "url": "https://example.com",
-                        "snippet": "Snippet",
-                        "published": None,
-                    }
-                ],
+                "results": [{"title": "Title", "url": "https://example.com", "snippet": "Snippet", "published": None}],
                 "result_count": 1,
             },
         )
@@ -190,19 +280,22 @@ class WebSearchEndpointTests(unittest.TestCase):
     def test_endpoint_maps_provider_error_and_timeout(self):
         payload = main.WebSearchRequest(query="hello")
         cases = (
-            (web_search.WebSearchProviderError("provider details must stay private"), 502),
-            (web_search.WebSearchTimeoutError("timeout details must stay private"), 504),
+            (web_search.WebSearchProviderError("private provider details"), 502),
+            (web_search.WebSearchTimeoutError("private timeout detail"), 504),
         )
         for error, expected_status in cases:
             with self.subTest(status=expected_status):
-                with (
-                    patch.object(main, "WEB_SEARCH_ENABLED", True),
-                    patch.object(main, "search_web", side_effect=error),
-                ):
-                    with self.assertRaises(HTTPException) as caught:
-                        asyncio.run(main.web_search_endpoint(payload))
-                self.assertEqual(caught.exception.status_code, expected_status)
-                self.assertNotIn("private", caught.exception.detail)
+                async def run():
+                    with (
+                        patch.object(main, "WEB_SEARCH_ENABLED", True),
+                        patch("app.main.search_web", new=AsyncMock(side_effect=error)),
+                    ):
+                        with self.assertRaises(HTTPException) as caught:
+                            await main.web_search_endpoint(payload)
+                    self.assertEqual(caught.exception.status_code, expected_status)
+                    self.assertNotIn("private", caught.exception.detail)
+
+                asyncio.run(run())
 
 
 class ExistingEndpointRegressionTests(unittest.TestCase):

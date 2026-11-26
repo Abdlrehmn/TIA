@@ -108,11 +108,26 @@ WEB_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("TIA_WEB_SEARCH_TIMEOUT", "10"))
 WEB_SEARCH_MAX_RESULTS = int(os.environ.get("TIA_WEB_SEARCH_MAX_RESULTS", "5"))
 WEB_SEARCH_SAFESEARCH = os.environ.get("TIA_WEB_SEARCH_SAFESEARCH", "moderate").strip().lower()
 WEB_SEARCH_REGION = os.environ.get("TIA_WEB_SEARCH_REGION", "us-en").strip().lower()
+WEB_SEARCH_MAX_PAGES = int(os.environ.get("TIA_WEB_SEARCH_MAX_PAGES", "3"))
+WEB_SEARCH_PAGE_TIMEOUT_SECONDS = int(os.environ.get("TIA_WEB_SEARCH_PAGE_TIMEOUT", "8"))
+WEB_SEARCH_TOTAL_CONTENT_TIMEOUT_SECONDS = int(os.environ.get("TIA_WEB_SEARCH_TOTAL_CONTENT_TIMEOUT", "25"))
+WEB_SEARCH_MAX_PAGE_BYTES = int(os.environ.get("TIA_WEB_SEARCH_MAX_PAGE_BYTES", str(2 * 1024 * 1024)))
+WEB_SEARCH_MAX_PAGE_CHARS = int(os.environ.get("TIA_WEB_SEARCH_MAX_PAGE_CHARS", "5000"))
 
 if not 1 <= WEB_SEARCH_TIMEOUT_SECONDS <= 120:
     raise ValueError("TIA_WEB_SEARCH_TIMEOUT must be between 1 and 120 seconds.")
 if not 1 <= WEB_SEARCH_MAX_RESULTS <= 20:
     raise ValueError("TIA_WEB_SEARCH_MAX_RESULTS must be between 1 and 20.")
+if not 1 <= WEB_SEARCH_MAX_PAGES <= 5:
+    raise ValueError("TIA_WEB_SEARCH_MAX_PAGES must be between 1 and 5.")
+if not 1 <= WEB_SEARCH_PAGE_TIMEOUT_SECONDS <= 30:
+    raise ValueError("TIA_WEB_SEARCH_PAGE_TIMEOUT must be between 1 and 30 seconds.")
+if not WEB_SEARCH_PAGE_TIMEOUT_SECONDS <= WEB_SEARCH_TOTAL_CONTENT_TIMEOUT_SECONDS <= 120:
+    raise ValueError("TIA_WEB_SEARCH_TOTAL_CONTENT_TIMEOUT must be at least the page timeout and at most 120 seconds.")
+if not 64 * 1024 <= WEB_SEARCH_MAX_PAGE_BYTES <= 10 * 1024 * 1024:
+    raise ValueError("TIA_WEB_SEARCH_MAX_PAGE_BYTES must be between 65536 and 10485760.")
+if not 1_000 <= WEB_SEARCH_MAX_PAGE_CHARS <= 20_000:
+    raise ValueError("TIA_WEB_SEARCH_MAX_PAGE_CHARS must be between 1000 and 20000.")
 if WEB_SEARCH_SAFESEARCH not in {"on", "moderate", "off"}:
     raise ValueError("TIA_WEB_SEARCH_SAFESEARCH must be on, moderate, or off.")
 if not re.fullmatch(r"[a-z]{2}-[a-z]{2}", WEB_SEARCH_REGION):

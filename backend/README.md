@@ -44,11 +44,15 @@ Python backend. A packaged Python runtime and private per-launch handoff need a
 separate implementation. Until then a packaged build without trusted external
 bootstrap fails closed and cannot use the local API.
 
-## Optional DuckDuckGo text search
+## Optional Bing text search
 
-The backend includes an explicit text-search endpoint. Search is disabled by
-default. To enable it for the current PowerShell session, set the environment
-variable before starting Uvicorn:
+The backend searches Bing for result titles, public URLs, and snippets. It
+uses Scrapling first and a shared headless Chromium browser through Playwright
+if Scrapling times out, is blocked, or produces no valid results. The explicit
+search endpoint returns metadata only; chat separately retrieves up to three
+result pages for bounded evidence. Search is disabled by default. To enable it for the
+current PowerShell session, set the environment variable before starting
+Uvicorn:
 
 ```powershell
 $env:TIA_WEB_SEARCH_ENABLED = "true"
@@ -63,8 +67,13 @@ Optional settings (defaults shown):
 | `TIA_WEB_SEARCH_ENABLED` | `false` | `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off` |
 | `TIA_WEB_SEARCH_TIMEOUT` | `10` seconds | Integer from 1 to 120 |
 | `TIA_WEB_SEARCH_MAX_RESULTS` | `5` | Integer from 1 to 20 |
-| `TIA_WEB_SEARCH_SAFESEARCH` | `moderate` | `on`, `moderate`, `off` |
+| `TIA_WEB_SEARCH_SAFESEARCH` | `moderate` | `on`, `moderate`, `off` (mapped to Bing settings) |
 | `TIA_WEB_SEARCH_REGION` | `us-en` | Language-region code such as `us-en` |
+| `TIA_WEB_SEARCH_MAX_PAGES` | `3` | Integer from 1 to 5 |
+| `TIA_WEB_SEARCH_PAGE_TIMEOUT` | `8` seconds | Integer from 1 to 30 |
+| `TIA_WEB_SEARCH_TOTAL_CONTENT_TIMEOUT` | `25` seconds | At least page timeout, at most 120 |
+| `TIA_WEB_SEARCH_MAX_PAGE_BYTES` | `2097152` | Integer from 65536 to 10485760 |
+| `TIA_WEB_SEARCH_MAX_PAGE_CHARS` | `5000` | Integer from 1000 to 20000 |
 
 Call the endpoint with a query and an optional result limit (bounded by the
 configured maximum):
@@ -78,22 +87,27 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/search `
 
 The response contains `success`, the validated query, normalized result
 objects (`title`, `url`, `snippet`, and optional `published`), and
-`result_count`. A successful DuckDuckGo response with no parsed results is
-returned as an empty list. Disabled search returns HTTP 503; invalid input
-returns HTTP 422; request timeouts return HTTP 504; non-200 or malformed
-provider responses return a sanitized HTTP 502. URLs must use HTTP(S), cannot
-contain credentials, and private/reserved IP literals or common local host
-names are rejected. The backend sends the query to DuckDuckGo and does not
-fetch result pages. Search snippets are untrusted external text.
+`result_count`. If both retrieval methods complete without valid results, the
+endpoint returns an empty list. Disabled search returns HTTP 503; invalid
+input returns HTTP 422; exhausted request timeouts return HTTP 504; provider
+failures return a sanitized HTTP 502. Bing redirect links are unwrapped, and
+only validated public HTTP(S) result URLs are returned. Local, private,
+reserved, malformed, duplicate, and Bing navigation links are rejected.
+Search snippets and extracted webpage text are untrusted external text. Page
+requests are made only for validated Bing results. Each redirect is checked
+again; DNS answers must be globally routable and are pinned to the validated IP
+for Scrapling. Chromium uses an authenticated shared loopback HTTP proxy that
+resolves and pins each connection, with Playwright request routing as an
+additional check.
+Local, private, reserved, link-local, unsupported-scheme, and nonstandard-port
+destinations are blocked. Page bytes, extracted characters, pages per query,
+concurrency, redirects, and total retrieval time are bounded.
 
-The request uses one DuckDuckGo attempt with the configured timeout; there is
-no retry. In `ddgs==9.16.1`, the package's standard engine path treats all
-non-200 responses as an empty body, which can then look like "No results
-found." TIA preserves the HTTP status so challenges and provider failures are
-reported as errors instead of successful empty searches. Retries are avoided
-for these responses because a challenge response is not transient evidence of
-an empty result set, and retries increase latency without resolving provider
-access restrictions.
+The Scrapling request uses one attempt and a bounded timeout. One shared
+Playwright browser is started and closed with the FastAPI application
+lifespan; each fallback search gets an isolated browser context. Concurrent
+searches are bounded to four at a time. Search-provider failures do not
+expose internal exception details.
 
 ## Search-augmented chat
 
@@ -106,11 +120,12 @@ current-time wording such as â€œaaj,â€ â€œabhi,â€ and â€œk
 intentionally conservative and can be extended later without adding a
 classification model.
 
-When search is enabled and returns validated results, FastAPI passes up to five
-results as a separate, size-bounded system context message. That message labels
-the JSON result data as untrusted, tells Qwen not to follow instructions in it,
-and asks it not to fabricate citations. The backend appends Markdown source
-links using the validated result titles and URLs. Search results and snippets
+When search is enabled, chat fetches up to three validated result pages with
+Scrapling and uses the shared Playwright browser when a page is unavailable,
+empty, or JavaScript-heavy. Failed page fetches retain the validated search
+snippet. FastAPI passes up to five sources as size-bounded, clearly labeled
+untrusted JSON. Instructions tell Qwen not to follow page text as commands or
+policy. The backend appends Markdown source links from validated URLs. Search results and snippets
 are never sent to React as a separate data payload or rendered as raw HTML.
 
 The streaming protocol still uses `start`, `delta`, `done`, and `error`. Search
@@ -118,13 +133,11 @@ starts after `start`; periodic SSE comment heartbeats keep the frontend's
 inactivity timer alive and are ignored by its parser. If search is disabled,
 times out, fails, or yields no usable results, FastAPI emits a clear `error`
 event and does not ask Qwen to answer a current-information question from stale
-training knowledge. Ordinary local questions do not call DuckDuckGo and still
+training knowledge. Ordinary local questions do not call Bing and still
 work when the provider is unavailable. `POST /api/v1/chat/test` remains
 unchanged.
 
-Live DuckDuckGo remains unreliable in this environment: genuine requests
-received HTTP 202 or timed out. Mocked integration tests verify the orchestration
-and failure behavior; they do not establish live search availability.
+Live Bing search returned three pages, and Scrapling extracted readable text from all three. The Playwright page fallback was separately forced against Python.org through the safe shared proxy and extracted 1,395 characters. Provider availability depends on Bing, source sites, and network access.
 
 ## SQLite conversation foundation (Phase 5, Milestone 1)
 
@@ -219,7 +232,7 @@ memory bound, not an exact tokenizer count.
 
 Search intent and the SSE `start`/`delta`/`done`/`error` protocol remain in
 place, including heartbeat comments and answer-only `message.content` handling.
-Web search remains opt-in and uses the existing local DuckDuckGo integration.
+Web search remains opt-in and uses Scrapling for Bing result discovery with a Playwright fallback. DDGS remains in the dependency list temporarily for rollback.
 
 Stop the server with `Ctrl+C` in the window running Uvicorn. To leave the
 virtual environment afterward, run `deactivate`.

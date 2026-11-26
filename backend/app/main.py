@@ -40,11 +40,14 @@ from app.services.chat_context import (
     build_sources_markdown,
 )
 from app.services.search_intent import needs_web_search
+from app.services.web_content import retrieve_search_content
 from app.services.web_search import (
     WebSearchError,
     WebSearchResult,
     WebSearchTimeoutError,
     search_web,
+    start_web_search,
+    close_web_search,
 )
 from app.services.conversation_store import (
     ConflictError,
@@ -69,9 +72,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Initialize persistent local storage before serving API requests."""
+    """Initialize storage and shared search resources for this app process."""
     await asyncio.to_thread(initialize_database)
-    yield
+    await start_web_search()
+    try:
+        yield
+    finally:
+        await close_web_search()
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=lifespan)
@@ -660,7 +667,7 @@ async def saved_content_events(
 
 @app.post("/api/v1/chat/stream", tags=["chat"])
 async def stream_message(payload: ConversationChatRequest, request: Request) -> StreamingResponse:
-    """Stream local answers, optionally grounding current-information questions in DDG results."""
+    """Stream local answers, optionally grounding current-information questions in Bing results."""
     history = prepare_conversation_turn(payload)
     current_message_id = payload.user_message_id if isinstance(payload, ConversationChatRequest) else None
     history = [item for item in history or [] if item.get("id") != current_message_id]
@@ -678,14 +685,18 @@ async def stream_message(payload: ConversationChatRequest, request: Request) -> 
                 return
 
             result_limit = min(WEB_SEARCH_MAX_RESULTS, MAX_CHAT_SEARCH_RESULTS)
-            search_task = asyncio.create_task(
-                asyncio.to_thread(search_web, payload.message, result_limit)
-            )
+
+            async def retrieve_search_sources() -> list[WebSearchResult]:
+                search_results = await search_web(payload.message, result_limit)
+                return await retrieve_search_content(search_results)
+
+            search_task = asyncio.create_task(retrieve_search_sources())
             try:
                 while not search_task.done():
                     if await request.is_disconnected():
                         search_task.cancel()
-                        logger.info("Client disconnected while DuckDuckGo search was running.")
+                        await asyncio.gather(search_task, return_exceptions=True)
+                        logger.info("Client disconnected while Bing search was running.")
                         return
                     completed, _ = await asyncio.wait(
                         (search_task,),
@@ -696,6 +707,7 @@ async def stream_message(payload: ConversationChatRequest, request: Request) -> 
                 results = await search_task
             except asyncio.CancelledError:
                 search_task.cancel()
+                await asyncio.gather(search_task, return_exceptions=True)
                 raise
             except WebSearchTimeoutError:
                 yield sse_event("error", {"message": search_failure_message()})
@@ -705,7 +717,7 @@ async def stream_message(payload: ConversationChatRequest, request: Request) -> 
                 return
 
             if await request.is_disconnected():
-                logger.info("Client disconnected after DuckDuckGo search completed.")
+                logger.info("Client disconnected after Bing search completed.")
                 return
 
             context_results = bounded_search_results(results)
@@ -768,7 +780,7 @@ async def stream_message(payload: ConversationChatRequest, request: Request) -> 
 
 @app.post("/api/v1/search", response_model=WebSearchResponse, tags=["search"])
 async def web_search_endpoint(payload: WebSearchRequest) -> WebSearchResponse:
-    """Search DuckDuckGo for text results without fetching result pages."""
+    """Search Bing for text results without fetching result pages."""
     if not WEB_SEARCH_ENABLED:
         raise HTTPException(
             status_code=503,
@@ -776,15 +788,11 @@ async def web_search_endpoint(payload: WebSearchRequest) -> WebSearchResponse:
         )
 
     try:
-        results: list[WebSearchResult] = await asyncio.to_thread(
-            search_web,
-            payload.query,
-            payload.max_results,
-        )
+        results: list[WebSearchResult] = await search_web(payload.query, payload.max_results)
     except WebSearchTimeoutError:
-        raise HTTPException(status_code=504, detail="DuckDuckGo search timed out.") from None
+        raise HTTPException(status_code=504, detail="Bing search timed out.") from None
     except WebSearchError:
-        raise HTTPException(status_code=502, detail="DuckDuckGo search is unavailable.") from None
+        raise HTTPException(status_code=502, detail="Bing search is unavailable.") from None
 
     response_results = [
         WebSearchResultResponse(

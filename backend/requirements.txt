@@ -2,3 +2,5 @@ fastapi==0.163.1
 uvicorn[standard]==0.54.0
 pydantic==2.14.3
 ddgs==9.16.1
+scrapling[fetchers]==0.5.1
+playwright==1.65.2

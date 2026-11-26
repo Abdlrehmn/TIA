@@ -19,16 +19,21 @@ local model; voice and computer task features remain unimplemented.
   Milestone 2A adds the backend-only response prompt and configurable 10-minute
   keep-alive; Milestone 2B adds safe Markdown rendering; Milestone 2C streams
   answer content through FastAPI SSE; Milestone 3A adds an opt-in backend
-  DuckDuckGo text-search endpoint; Milestone 3B adds deterministic search
-  selection and bounded search context for current-information chat requests.
-  Search is disabled by default. Live DuckDuckGo availability remains unverified
-  because observed requests returned HTTP 202 or timed out.
+  web-search endpoint; Milestone 3B adds deterministic search selection
+  and bounded search context for current-information chat requests. Phase 5
+  Milestone 2 replaces DDGS as the active provider with Bing via Scrapling and
+  a shared Playwright Chromium fallback. Search remains disabled by default;
+  DDGS stays pinned temporarily for rollback.
 - **Phase 5: IN PROGRESS** — Milestone 1 SQLite conversation schema/API and
   Milestone 2 conversation-aware Qwen context, completed response persistence,
-  and frontend synchronization are implemented. Milestone 3.1 adds fail-closed
-  local API authentication, exact app origins, sequential schema version 2
-  migrations, and conversation turn provenance. Production Python backend
-  bundling and supervised private token bootstrap remain incomplete.
+  and frontend synchronization are implemented. Milestone 3.1 adds fail-closed local API authentication, exact app origins,
+  sequential schema version 2 migrations, and conversation turn provenance.
+  The web-search migration milestones replace DDGS with Bing via Scrapling and
+  a shared Playwright fallback, then fetch bounded source-page text for chat.
+  DNS-pinned requests, redirects, response size, context size, and browser
+  subrequests are guarded. Live search and both fetch methods were verified.
+  Production Python backend bundling and supervised private token bootstrap
+  remain incomplete.
 
 ## Completed and verified in Phase 1
 
@@ -73,19 +78,18 @@ These are owner-reported results; this review did not rerun them.
 - Multi-turn chat context is retrieved from SQLite and bounded to 12 recent
   messages and 12,000 characters by default. Ollama health reporting is not
   implemented.
-- `POST /api/v1/search` performs an explicit DuckDuckGo text search only when
-  `TIA_WEB_SEARCH_ENABLED=true`. It returns normalized titles, URLs, snippets,
-  and optional publication dates. The chat stream uses deterministic wording
-  rules to invoke this service for likely current-information questions. It
-  passes at most five bounded results to Ollama as untrusted context and adds
-  validated source links to the streamed answer. It does not fetch result pages.
-  The service rejects private/reserved IP literals and common local host names,
-  and reports non-200 DDG responses as provider failures instead of treating
-  them as empty results.
-  Availability depends on DuckDuckGo accepting requests from the host; a live
-  request in the current environment received HTTP 202 (anomaly/challenge
-  response), and sandboxed requests timed out. No retries are used for these
-  provider failures.
+- `POST /api/v1/search` performs an explicit Bing result search only when
+  `TIA_WEB_SEARCH_ENABLED=true`. Scrapling `AsyncFetcher` is primary; a shared
+  headless Chromium browser through Playwright is used when Scrapling fails,
+  is blocked, times out, or returns no valid results. The API response schema,
+  authentication, and chat SSE contract are unchanged. Results include
+  validated titles, public URLs, and snippets; the backend does not fetch
+  result pages. Bing redirects, ads, malformed URLs, private/local destinations,
+  and duplicate URLs are rejected. Bing receives the query when opt-in search
+  runs. DDGS remains pinned temporarily for rollback. Mocked tests cover
+  provider failure, fallback, validation, concurrency, lifecycle, and API
+  behavior. Live search returned three results and Scrapling extracted all three pages;
+  a forced Playwright page fetch extracted Python.org through the safe proxy.
 - Voice input, speech output, wake word, and microphone capture are absent.
 - Settings are a static interface, not application configuration.
 - React synchronizes localStorage with SQLite on startup and preserves stable

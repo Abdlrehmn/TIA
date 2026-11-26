@@ -130,7 +130,14 @@ class ConversationChatTests(unittest.TestCase):
             request = MagicMock(is_disconnected=AsyncMock(return_value=False))
             with (
                 patch.object(main, "WEB_SEARCH_ENABLED", True),
-                patch("app.main.search_web", return_value=[WebSearchResult("Python", "https://example.com", "version", None)]),
+                patch(
+                    "app.main.search_web",
+                    new=AsyncMock(return_value=[WebSearchResult("Python", "https://example.com", "version", None)]),
+                ),
+                patch(
+                    "app.main.retrieve_search_content",
+                    new=AsyncMock(side_effect=lambda results: results),
+                ),
                 patch("app.main.open_ollama_stream", new=AsyncMock(return_value=upstream)),
             ):
                 response = await main.stream_message(payload, request)

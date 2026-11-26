@@ -60,10 +60,10 @@ chosen, and how the phases fit together. It is the companion to
 5. **Never:** bypass MFA/CAPTCHA, store plaintext credentials, or give
    the model unrestricted shell access.
 
-## 4. Current data flow (Phases 1-5, Milestone 1)
+## 4. Current data flow (Phases 1-5, Milestone 2)
 
 - `ChatInput â†’ ChatPage.handleSend â†’ authenticated api.ts (POST /api/v1/chat/stream) â†’
-  FastAPI search-intent check â†’ either local Ollama or configured DuckDuckGo â†’
+  FastAPI search-intent check â†’ either local Ollama or opt-in Bing search (Scrapling, then Playwright fallback) â†’
   bounded untrusted reference context â†’ local Ollama SSE â†’ accumulated Markdown
   response with backend-generated validated source links â†’ localStorage`.
 - `POST /api/v1/chat/test` remains available for non-streaming replies.
@@ -82,14 +82,19 @@ chosen, and how the phases fit together. It is the companion to
   `TIA_OLLAMA_KEEP_ALIVE`, and optionally `TIA_OLLAMA_SYSTEM_PROMPT`; configured
   Ollama hosts must be loopback addresses.
 - `useBackendHealth` polls `GET /health` every 3 s to drive the status chip.
-- An independent `POST /api/v1/search` endpoint can query DuckDuckGo through
-  the backend `ddgs` package. It is disabled unless
-  `TIA_WEB_SEARCH_ENABLED=true`, validates and normalizes returned result
-  metadata, rejects private/reserved IP literals and common local host names,
-  and never fetches result pages. Search snippets are untrusted external text
-  and are not added to Ollama prompts; the frontend does not call DuckDuckGo
-  directly. Non-200 provider responses are surfaced as provider errors; no
-  retry is attempted for a provider challenge.
+- An independent `POST /api/v1/search` endpoint discovers Bing results using
+  Scrapling `AsyncFetcher`, with a shared headless Chromium Playwright fallback
+  when Scrapling fails, is blocked, times out, or yields no valid links. It is
+  disabled unless `TIA_WEB_SEARCH_ENABLED=true`, validates and normalizes
+  result metadata, rejects Bing navigation/ad links and unsafe or duplicate
+  destinations; the explicit metadata endpoint does not fetch pages. Chat fetches
+  up to three result pages asynchronously, with DNS-pinned Scrapling and a shared
+  Playwright browser fallback routed through an authenticated loopback HTTP proxy
+  that pins connections to validated public IP addresses.
+  Redirects and browser subrequests are validated, page bytes and extracted
+  text are bounded, and fetched text/snippets are untrusted evidence. Search
+  queries and selected source URLs leave the machine only when opt-in search runs.
+  DDGS remains as a pinned rollback dependency but is no longer active.
 - A deterministic backend detector triggers search for time-sensitive wording
   and inherently changing topics such as news, weather, prices, scores, updates,
   versions, and releases. Ordinary educational and coding prompts stay on the
